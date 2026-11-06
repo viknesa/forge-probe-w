@@ -1,5 +1,5 @@
-# K1-7t / K1-9 probe workflow for the DISPOSABLE public repository viknesa/forge-probe-w (W'). Rev 4.
-# The coordinator pushes it to W' as .github/workflows/k1-route.yml after replacing forge-probe-vik with the probe organization
+# K1-7t / K1-9 probe workflow for the DISPOSABLE public repository viknesa/forge-probe-w (W'). Rev 4; rev 9: set +e and request evidence.
+# The coordinator pushes it to W' as .github/workflows/k1-route.yml after replacing viknesa with the probe organization
 # name. It reads only; it never writes; it touches no Forge repository. W' is public, so its run logs are readable by
 # the coordinator directly (no export relay needed).
 # Classification (rev 3): a target counts as DENIED_GITHUB only with a recognised refusal signature
@@ -16,22 +16,24 @@ jobs:
     timeout-minutes: 2
     steps:
       - run: |
-          set -u -o pipefail
+          set +e -u -o pipefail   # rev 9: GitHub runs bash steps with -e; a refused target must not abort the job (attempt 3, run 41798509728)
           echo "K1-7t trigger reached W' run=$GITHUB_RUN_ID event=$GITHUB_EVENT_NAME sha=$GITHUB_SHA"
           git ls-remote "https://x-access-token:$TOK@github.com/$GITHUB_REPOSITORY.git" HEAD >/dev/null 2>&1; c=$?
           echo "CONTROL W' read with own GITHUB_TOKEN exit $c (expect 0)"
           [ "$c" = 0 ] || { echo "RESULT K1-9 INCONCLUSIVE (control failed)"; exit 3; }
           worst=0   # 0 denied, 3 inconclusive, 1 access
           note(){ [ "$1" = 1 ] && worst=1; [ "$1" = 3 ] && [ "$worst" = 0 ] && worst=3; }
-          for T in exec-probe root-probe; do
-            err=$(git ls-remote "https://x-access-token:$TOK@github.com/forge-probe-vik/$T.git" 2>&1 >/dev/null); g=$?
+          for T in forge-transport; do
+            err=$(GIT_TRACE_CURL=1 GIT_TRACE_CURL_NO_DATA=1 git ls-remote "https://x-access-token:$TOK@github.com/viknesa/$T.git" 2>&1 >/dev/null); g=$?
+            printf '%s\n' "$err" | grep -E 'Send header: (GET|POST) |Recv header: HTTP/' | sed 's/^/K1-9 EVIDENCE git /'   # rev 9: request identity (no Authorization lines)
             if [ "$g" = 0 ]; then cls=ACCESS; note 1
             elif printf '%s' "$err" | grep -qiE 'remote: Repository not found|repository .+ not found|The requested URL returned error: 403'; then cls=DENIED_GITHUB
             else cls=TOOL_ERROR; note 3; fi
-            echo "K1-9 git read forge-probe-vik/$T exit $g class $cls stderr=$(printf '%s' "$err" | head -c 160 | tr '\n' ' ')"
-            h=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "https://api.github.com/repos/forge-probe-vik/$T")
+            echo "K1-9 git read viknesa/$T exit $g class $cls stderr=$(printf '%s' "$err" | head -c 160 | tr '\n' ' ')"
+            h=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOK" "https://api.github.com/repos/viknesa/$T")
+            echo "K1-9 EVIDENCE rest GET /repos/viknesa/$T -> $h"   # rev 9: the request path as sent
             case "$h" in 404|403) cls=DENIED_GITHUB;; 200) cls=ACCESS; note 1;; *) cls=TOOL_ERROR; note 3;; esac
-            echo "K1-9 REST read forge-probe-vik/$T http $h class $cls"
+            echo "K1-9 REST read viknesa/$T http $h class $cls"
           done
           case $worst in 0) echo "RESULT K1-9 DENIED_GITHUB (all targets, control ok)";; 1) echo "RESULT K1-9 ACCESS";; 3) echo "RESULT K1-9 INCONCLUSIVE";; esac
           exit $worst
